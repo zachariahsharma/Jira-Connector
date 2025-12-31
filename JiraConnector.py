@@ -1,7 +1,6 @@
 ### Imports
 
 from jira import JIRA
-from jira.resources import Attachment
 import os
 from dotenv import load_dotenv
 import time
@@ -28,9 +27,16 @@ jira = JIRA(
 ### AutoCAM Setup
 session = requests.Session()
 session.headers.update({"Authorization": f"Bearer {AUTOCAM_APIKEY}"})
-
+teamid = None
 
 ### Helper Functions
+
+
+def getTeamID():
+    teamid = session.get("http://localhost:3000/api/teams").json()["id"]
+    return teamid
+
+
 def getJiraIssues():
     issues = jira.search_issues(
         'project = Hardware AND assignee = Empty AND status = "Ready to Fabricate"  and Machinery = "CNC Router"'
@@ -79,9 +85,13 @@ def handlePostgresParts(Name, Epic, Ticket, Quantity, category_id, attachment):
         try:
             print(response.json())
         except requests.exceptions.JSONDecodeError:
-            print(f"Part created successfully, but response was not JSON: {response.text}")
+            print(
+                f"Part created successfully, but response was not JSON: {response.text}"
+            )
     else:
-        print(f"Failed to create part. Status: {response.status_code}, Response: {response.text}")
+        print(
+            f"Failed to create part. Status: {response.status_code}, Response: {response.text}"
+        )
 
 
 def cleanUpOldParts(issue_keys: set[str]):
@@ -97,6 +107,25 @@ def cleanUpOldParts(issue_keys: set[str]):
                 session.delete(f"http://localhost:3000/api/parts/{part['id']}")
         if len(parts) == 0:
             session.delete(f"http://localhost:3000/api/pc/{pc['id']}")
+
+
+def handleBoxTubes(Name, Epic, Ticket, Quantity, teamid=teamid):
+    boxtubes = session.get("http://localhost:3000/api/boxTubes")
+    boxtubes = boxtubes.json()
+    for boxtube in boxtubes:
+        if boxtube["ticket"] == Ticket:
+            return
+    response = session.post(
+        "http://localhost:3000/api/boxTubes",
+        json={
+            "name": Name,
+            "epic": Epic,
+            "ticket": Ticket,
+            "quantity": Quantity,
+            "teamid": teamid,
+        },
+    )
+    return response
 
 
 ### Main Function
@@ -130,6 +159,10 @@ def processJiraIssues():
             or len(attachments) == 0
         ):
             continue
+        if "tube" in Name.lower():
+            handleBoxTubes(Name, Epic, Ticket, Quantity, teamid)
+            processed += 1
+            continue
         category_id = handlePostgresPartCategories(Material, Thickness)
         handlePostgresParts(Name, Epic, Ticket, Quantity, category_id, attachments[0])
         processed += 1
@@ -139,6 +172,7 @@ def processJiraIssues():
 
 
 if __name__ == "__main__":
+    teamid = getTeamID()
     while True:
         processJiraIssues()
         time.sleep(60)
