@@ -84,3 +84,4 @@ This connector expects the following custom fields on Jira issues:
 
 MIT
 
+
