@@ -45,7 +45,7 @@ def getJiraIssues():
 
 
 def handlePostgresPartCategories(Material, Thickness):
-    part_category = { "material": Material, "thickness": Thickness }
+    part_category = {"material": Material, "thickness": Thickness}
     response = session.get("http://localhost:3000/api/pc", params=part_category)
     pc = response.json()
     if len(pc):
@@ -115,7 +115,7 @@ def cleanUpOldParts(issue_keys: set[str]):
             session.delete(f"http://localhost:3000/api/pc/{pc['id']}")
 
 
-def handleBoxTubes(Name, Epic, Ticket, Quantity, teamid=teamid):
+def handleBoxTubes(Name, Epic, Ticket, Quantity, teamid=teamid, attachment=None):
     boxtubes = session.get("http://localhost:3000/api/boxTubes")
     boxtubes = boxtubes.json()
     for boxtube in boxtubes:
@@ -123,14 +123,27 @@ def handleBoxTubes(Name, Epic, Ticket, Quantity, teamid=teamid):
             return
     response = session.post(
         "http://localhost:3000/api/boxTubes",
-        json={
-            "name": Name,
-            "epic": Epic,
-            "ticket": Ticket,
-            "quantity": Quantity,
-            "teamid": teamid,
+        files={
+            "data": (
+                None,
+                json.dumps(
+                    {
+                        "name": Name,
+                        "epic": Epic,
+                        "ticket": Ticket,
+                        "quantity": Quantity,
+                        "teamid": teamid,
+                    }
+                ),
+                "application/json",
+            ),
+            "file": (attachment.filename, attachment.get(), "application/octet-stream"),
         },
     )
+    if not response.ok:
+        print(
+            f"Failed to create box/tube. Status: {response.status_code}, Response: {response.text}"
+        )
     return response
 
 
@@ -166,12 +179,14 @@ def processJiraIssues():
         ):
             continue
         if "tube" in Name.lower():
-            handleBoxTubes(Name, Epic, Ticket, Quantity, teamid)
+            handleBoxTubes(Name, Epic, Ticket, Quantity, teamid, attachments[0])
             processed += 1
             continue
         category_id = handlePostgresPartCategories(Material, Thickness)
         if category_id:
-            handlePostgresParts(Name, Epic, Ticket, Quantity, category_id, attachments[0])
+            handlePostgresParts(
+                Name, Epic, Ticket, Quantity, category_id, attachments[0]
+            )
             processed += 1
 
     print(f"Finished processing issues. {processed} processed.")
