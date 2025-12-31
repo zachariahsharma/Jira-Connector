@@ -54,14 +54,20 @@ def handlePostgresPartCategories(Material, Thickness):
         "http://localhost:3000/api/pc",
         json={"material": Material, "thickness": Thickness},
     )
-    category_id = response.json().get("id")
+    if not response.ok:
+        print(
+            f"Failed to create part category. Status: {response.status_code}, Response: {response.text}"
+        )
+        return None
+
+    category_id = list(response.json())[0].get("id")
     return category_id
 
 
 def handlePostgresParts(Name, Epic, Ticket, Quantity, category_id, attachment):
     parts = session.get(f"http://localhost:3000/api/pc/{category_id}/parts").json()
     for part in parts:
-        if part["ticket"] == Ticket:
+        if part.get("ticket") == Ticket:
             return
     response = session.post(
         f"http://localhost:3000/api/pc/{category_id}/parts",
@@ -92,6 +98,15 @@ def handlePostgresParts(Name, Epic, Ticket, Quantity, category_id, attachment):
         print(
             f"Failed to create part. Status: {response.status_code}, Response: {response.text}"
         )
+        print(
+            "Data sent:",
+            {
+                "name": Name,
+                "epic": Epic,
+                "ticket": Ticket,
+                "quantity": Quantity,
+            },
+        )
 
 
 def cleanUpOldParts(issue_keys: set[str]):
@@ -102,7 +117,7 @@ def cleanUpOldParts(issue_keys: set[str]):
     for pc in session.get("http://localhost:3000/api/pc").json():
         parts = session.get(f"http://localhost:3000/api/pc/{pc['id']}/parts").json()
         for part in parts:
-            if part["ticket"] not in issue_keys:
+            if part.get("ticket") not in issue_keys:
                 deleted_parts.append(part)
                 session.delete(f"http://localhost:3000/api/parts/{part['id']}")
         if len(parts) == 0:
@@ -113,7 +128,7 @@ def handleBoxTubes(Name, Epic, Ticket, Quantity, teamid=teamid):
     boxtubes = session.get("http://localhost:3000/api/boxTubes")
     boxtubes = boxtubes.json()
     for boxtube in boxtubes:
-        if boxtube["ticket"] == Ticket:
+        if boxtube.get("ticket") == Ticket:
             return
     response = session.post(
         "http://localhost:3000/api/boxTubes",
@@ -164,8 +179,9 @@ def processJiraIssues():
             processed += 1
             continue
         category_id = handlePostgresPartCategories(Material, Thickness)
-        handlePostgresParts(Name, Epic, Ticket, Quantity, category_id, attachments[0])
-        processed += 1
+        if category_id:
+            handlePostgresParts(Name, Epic, Ticket, Quantity, category_id, attachments[0])
+            processed += 1
 
     print(f"Finished processing issues. {processed} processed.")
     cleanUpOldParts(issue_keys)
