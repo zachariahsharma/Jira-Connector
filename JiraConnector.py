@@ -16,6 +16,7 @@ JIRA_USERNAME = os.getenv("JIRA_USERNAME")
 JIRA_PASSWORD = os.getenv("JIRA_PASSWORD")
 JIRA_SERVER = os.getenv("JIRA_SERVER")
 AUTOCAM_APIKEY = os.getenv("AUTOCAM_APIKEY")
+BASE_URL = os.getenv("AUTOCAM_BASEURL")
 
 
 ### JIRA Setup
@@ -33,7 +34,7 @@ teamid = None
 
 
 def getTeamID():
-    teamid = session.get("http://localhost:3000/api/teams").json()["id"]
+    teamid = session.get("{BASE_URL}/api/teams").json()["id"]
     return teamid
 
 
@@ -46,22 +47,22 @@ def getJiraIssues():
 
 def handlePostgresPartCategories(Material, Thickness):
     part_category = {"material": Material, "thickness": Thickness}
-    response = session.get("http://localhost:3000/api/pc", params=part_category)
+    response = session.get("{BASE_URL}/api/pc", params=part_category)
     pc = response.json()
     if len(pc):
         return pc[0]["id"]
-    response = session.post("http://localhost:3000/api/pc", json=part_category)
+    response = session.post("{BASE_URL}/api/pc", json=part_category)
     category_id = response.json().get("id")
     return category_id
 
 
 def handlePostgresParts(Name, Epic, Ticket, Quantity, category_id, attachment):
-    parts = session.get(f"http://localhost:3000/api/pc/{category_id}/parts").json()
+    parts = session.get(f"{BASE_URL}/api/pc/{category_id}/parts").json()
     for part in parts:
         if part.get("ticket") == Ticket:
             return
     response = session.post(
-        f"http://localhost:3000/api/pc/{category_id}/parts",
+        f"{BASE_URL}/api/pc/{category_id}/parts",
         files={
             "data": (
                 None,
@@ -105,24 +106,24 @@ def cleanUpOldParts(issue_keys: set[str]):
         print("No JIRA issues returned; skipping cleanup to avoid deleting everything.")
         return
     deleted_parts = []
-    for pc in session.get("http://localhost:3000/api/pc").json():
-        parts = session.get(f"http://localhost:3000/api/pc/{pc['id']}/parts").json()
+    for pc in session.get("{BASE_URL}/api/pc").json():
+        parts = session.get(f"{BASE_URL}/api/pc/{pc['id']}/parts").json()
         for part in parts:
             if part.get("ticket") not in issue_keys:
                 deleted_parts.append(part)
-                session.delete(f"http://localhost:3000/api/parts/{part['id']}")
+                session.delete(f"{BASE_URL}/api/parts/{part['id']}")
         if len(parts) == 0:
-            session.delete(f"http://localhost:3000/api/pc/{pc['id']}")
+            session.delete(f"{BASE_URL}/api/pc/{pc['id']}")
 
 
 def handleBoxTubes(Name, Epic, Ticket, Quantity, teamid=teamid, attachment=None):
-    boxtubes = session.get("http://localhost:3000/api/boxTubes")
+    boxtubes = session.get("{BASE_URL}/api/boxTubes")
     boxtubes = boxtubes.json()
     for boxtube in boxtubes:
         if boxtube.get("ticket") == Ticket:
             return
     response = session.post(
-        "http://localhost:3000/api/boxTubes",
+        "{BASE_URL}/api/boxTubes",
         files={
             "data": (
                 None,
