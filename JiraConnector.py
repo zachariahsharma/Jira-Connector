@@ -34,7 +34,7 @@ teamid = None
 
 
 def getTeamID():
-    teamid = session.get("{BASE_URL}/api/teams").json()["id"]
+    teamid = session.get(f"{BASE_URL}/api/teams").json()["id"]
     return teamid
 
 
@@ -47,7 +47,7 @@ def getJiraIssues():
 
 def handlePostgresPartCategories(Material, Thickness):
     part_category = {"material": Material, "thickness": Thickness}
-    response = session.get("{BASE_URL}/api/pc", params=part_category)
+    response = session.get(f"{BASE_URL}/api/pc", params=part_category)
     pc = response.json()
     if len(pc):
         return pc[0]["id"]
@@ -106,7 +106,7 @@ def cleanUpOldParts(issue_keys: set[str]):
         print("No JIRA issues returned; skipping cleanup to avoid deleting everything.")
         return
     deleted_parts = []
-    for pc in session.get("{BASE_URL}/api/pc").json():
+    for pc in session.get(f"{BASE_URL}/api/pc").json():
         parts = session.get(f"{BASE_URL}/api/pc/{pc['id']}/parts").json()
         for part in parts:
             if part.get("ticket") not in issue_keys:
@@ -117,13 +117,13 @@ def cleanUpOldParts(issue_keys: set[str]):
 
 
 def handleBoxTubes(Name, Epic, Ticket, Quantity, teamid=teamid, attachment=None):
-    boxtubes = session.get("{BASE_URL}/api/boxTubes")
+    boxtubes = session.get(f"{BASE_URL}/api/boxTubes")
     boxtubes = boxtubes.json()
     for boxtube in boxtubes:
         if boxtube.get("ticket") == Ticket:
             return
     response = session.post(
-        "{BASE_URL}/api/boxTubes",
+        f"{BASE_URL}/api/boxTubes",
         files={
             "data": (
                 None,
