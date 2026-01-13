@@ -56,7 +56,7 @@ def handlePostgresPartCategories(Material, Thickness):
     pc = response.json()
     if len(pc):
         return pc[0]["id"]
-    response = session.post("{BASE_URL}/api/pc", json=part_category)
+    response = session.post(f"{BASE_URL}/api/pc", json=part_category)
     category_id = response.json().get("id")
     return category_id
 
