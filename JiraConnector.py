@@ -34,7 +34,12 @@ teamid = None
 
 
 def getTeamID():
-    teamid = session.get(f"{BASE_URL}/api/teams").json()["id"]
+    print("Base URL: ", BASE_URL)
+    try:
+        teamid = session.get(f"{BASE_URL}/api/teams").json()["id"]
+    except Exception as e:
+        print(session.get(f"{BASE_URL}/api/teams").text)
+        raise Exception("Could not fetch team ID from AutoCAM API") from e
     return teamid
 
 
@@ -157,14 +162,18 @@ def processJiraIssues():
 
     processed = 0
     for issue in issues:
-        Epic = jira.issue(issue.get_field("customfield_10110")).get_field("summary")
-        Name = issue.get_field("summary")
-        Quantity = int(issue.get_field("customfield_10206"))
-        Ticket = issue.key
-        Material = str(issue.get_field("customfield_10202"))
-        Thickness = float(str(issue.get_field("customfield_10207")))
-        attachments = issue.get_field("attachment")
-        attachments = [att for att in attachments if att.filename.endswith(".step")]
+        try:
+            Epic = jira.issue(issue.get_field("customfield_10110")).get_field("summary")
+            Name = issue.get_field("summary")
+            Quantity = int(issue.get_field("customfield_10206"))
+            Ticket = issue.key
+            Material = str(issue.get_field("customfield_10202"))
+            Thickness = float(str(issue.get_field("customfield_10207")))
+            attachments = issue.get_field("attachment")
+            attachments = [att for att in attachments if att.filename.endswith(".step")]
+        except Exception as e:
+            print(f"Error processing issue {issue.key}: {e}")
+            continue
         if (
             not Material
             or not Thickness
