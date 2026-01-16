@@ -11,6 +11,7 @@ This connector monitors a Jira Hardware project for issues marked "Ready to Fabr
 - **Automatic Sync**: Polls Jira every 60 seconds for new fabrication jobs
 - **Part Categories**: Automatically organizes parts by material and thickness
 - **STEP File Support**: Extracts and uploads `.step` file attachments
+- **Draft Flow**: Saves incomplete Jira tickets as AutoCAM drafts and finalizes them when the missing data arrives
 - **Cleanup**: Removes parts from AutoCAM when their corresponding Jira tickets are no longer in the queue
 
 ## Requirements
@@ -63,11 +64,13 @@ The connector will continuously poll Jira and sync matching issues to AutoCAM.
    - Thickness
    - STEP file attachment
 
-3. Creates or updates part categories in AutoCAM based on material/thickness combinations
+3. If required fields are missing, stores or updates an AutoCAM draft while waiting for the remaining information
 
-4. Uploads parts with their STEP files to the appropriate category
+4. Creates or updates part categories in AutoCAM based on material/thickness combinations
 
-5. Cleans up any parts in AutoCAM that no longer have corresponding Jira tickets
+5. Uploads parts with their STEP files to the appropriate category
+
+6. Cleans up any parts in AutoCAM that no longer have corresponding Jira tickets
 
 ## Jira Custom Fields
 
@@ -83,7 +86,6 @@ This connector expects the following custom fields on Jira issues:
 ## License
 
 MIT
-
 
 
 
