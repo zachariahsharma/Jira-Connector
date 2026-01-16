@@ -29,6 +29,8 @@ jira = JIRA(
 session = requests.Session()
 session.headers.update({"Authorization": f"Bearer {AUTOCAM_APIKEY}"})
 teamid = None
+EMPTY_JIRA_PASS_THRESHOLD = 2
+consecutive_empty_jira_passes = 0
 
 ### Helper Functions
 
@@ -139,6 +141,44 @@ def cleanUpOldParts(issue_keys: set[str]):
                 session.delete(f"{BASE_URL}/api/parts/{part['id']}")
         if len(parts) == 0:
             session.delete(f"{BASE_URL}/api/pc/{pc['id']}")
+
+
+def deleteAllPartsAndCategories():
+    print(
+        "No JIRA issues for two consecutive passes; deleting all AutoCAM parts and categories."
+    )
+    try:
+        response = session.get(f"{BASE_URL}/api/pc")
+        response.raise_for_status()
+        categories = response.json()
+    except Exception as exc:
+        print(f"Failed to fetch part categories for deletion: {exc}")
+        return
+    for category in categories:
+        category_id = category.get("id")
+        if not category_id:
+            continue
+        try:
+            parts_response = session.get(f"{BASE_URL}/api/pc/{category_id}/parts")
+            parts_response.raise_for_status()
+            parts = parts_response.json()
+        except Exception as exc:
+            print(f"Failed to fetch parts for category {category_id}: {exc}")
+            continue
+        for part in parts:
+            part_id = part.get("id")
+            if not part_id:
+                continue
+            delete_response = session.delete(f"{BASE_URL}/api/parts/{part_id}")
+            if not delete_response.ok:
+                print(
+                    f"Failed to delete part {part_id}: {delete_response.status_code}, {delete_response.text}"
+                )
+        delete_response = session.delete(f"{BASE_URL}/api/pc/{category_id}")
+        if not delete_response.ok:
+            print(
+                f"Failed to delete category {category_id}: {delete_response.status_code}, {delete_response.text}"
+            )
 
 
 def cleanUpOldDrafts(issue_keys: set[str], drafts, issue_prefixes: set[str]):
@@ -299,12 +339,22 @@ def finalizeDraft(draft_id):
 
 ### Main Function
 def processJiraIssues():
+    global consecutive_empty_jira_passes
     issues = getJiraIssues()
+    issue_count = len(issues)
     issue_keys = {issue.key for issue in issues}
     issue_prefixes = {key.split("-")[0] for key in issue_keys if "-" in key}
     drafts, drafts_by_ticket_type, drafts_by_ticket = fetchTeamDrafts(teamid)
 
-    print("issues found:", len(issues))
+    if issue_count == 0:
+        consecutive_empty_jira_passes += 1
+        print(
+            f"No JIRA issues found. Empty pass count: {consecutive_empty_jira_passes}"
+        )
+    else:
+        consecutive_empty_jira_passes = 0
+
+    print("issues found:", issue_count)
 
     processed = 0
     for issue in issues:
@@ -415,6 +465,9 @@ def processJiraIssues():
     print(f"Finished processing issues. {processed} processed.")
     cleanUpOldParts(issue_keys)
     cleanUpOldDrafts(issue_keys, drafts, issue_prefixes)
+    if issue_count == 0 and consecutive_empty_jira_passes >= EMPTY_JIRA_PASS_THRESHOLD:
+        deleteAllPartsAndCategories()
+        consecutive_empty_jira_passes = 0
 
 
 if __name__ == "__main__":
