@@ -145,8 +145,24 @@ def cleanUpOldParts(issue_keys: set[str]):
 
 def deleteAllPartsAndCategories():
     print(
-        "No JIRA issues for two consecutive passes; deleting all AutoCAM parts and categories."
+        "No JIRA issues for two consecutive passes; deleting all AutoCAM parts, categories, and box tubes."
     )
+    try:
+        box_tube_response = session.get(f"{BASE_URL}/api/boxTubes")
+        box_tube_response.raise_for_status()
+        box_tubes = box_tube_response.json()
+    except Exception as exc:
+        print(f"Failed to fetch box tubes for deletion: {exc}")
+    else:
+        for tube in box_tubes:
+            tube_id = tube.get("id")
+            if not tube_id:
+                continue
+            delete_response = session.delete(f"{BASE_URL}/api/boxTubes/{tube_id}")
+            if not delete_response.ok:
+                print(
+                    f"Failed to delete box tube {tube_id}: {delete_response.status_code}, {delete_response.text}"
+                )
     try:
         response = session.get(f"{BASE_URL}/api/pc")
         response.raise_for_status()
