@@ -55,13 +55,41 @@ def safe_positive_float(value):
         return None
 
 
+def safe_json_response(response, context=""):
+    """Return parsed JSON or None if the response is not usable."""
+    if response is None:
+        return None
+    try:
+        response.raise_for_status()
+    except requests.exceptions.RequestException as exc:
+        status = getattr(response, "status_code", "unknown")
+        message = f"{context} failed with status {status}: {exc}" if context else str(exc)
+        print(message)
+        body = getattr(response, "text", "")
+        if body:
+            print(f"Response body (truncated): {body[:500]}")
+        return None
+    try:
+        return response.json()
+    except ValueError:
+        snippet = response.text[:500] if hasattr(response, "text") else ""
+        print(f"{context} returned non-JSON response: {snippet}")
+        return None
+
+
 def getTeamID():
     print("Base URL: ", BASE_URL)
     try:
-        teamid = session.get(f"{BASE_URL}/api/teams").json()["id"]
-    except Exception as e:
-        print(session.get(f"{BASE_URL}/api/teams").text)
-        raise Exception("Could not fetch team ID from AutoCAM API") from e
+        response = session.get(f"{BASE_URL}/api/teams")
+    except requests.exceptions.RequestException as exc:
+        raise Exception("Could not reach AutoCAM API for team ID") from exc
+    data = safe_json_response(response, "Fetch AutoCAM team ID")
+    if not data:
+        raise Exception("AutoCAM API returned no data for team ID")
+    target = data[0] if isinstance(data, list) and data else data
+    teamid = target.get("id") if isinstance(target, dict) else None
+    if not teamid:
+        raise Exception("Could not fetch team ID from AutoCAM API")
     return teamid
 
 
@@ -75,16 +103,29 @@ def getJiraIssues():
 def handlePostgresPartCategories(Material, Thickness):
     part_category = {"material": Material, "thickness": Thickness}
     response = session.get(f"{BASE_URL}/api/pc", params=part_category)
-    pc = response.json()
-    if len(pc):
-        return pc[0]["id"]
+    pc = safe_json_response(response, "Fetch part categories") or []
+    for category in pc:
+        if not isinstance(category, dict):
+            continue
+        if (
+            category.get("material") == Material
+            and category.get("thickness") == Thickness
+        ):
+            return category.get("id")
     response = session.post(f"{BASE_URL}/api/pc", json=part_category)
-    category_id = response.json().get("id")
-    return category_id
+    created = safe_json_response(response, "Create part category")
+    if created and isinstance(created, dict):
+        return created.get("id")
+    return None
 
 
 def handlePostgresParts(Name, Epic, Ticket, Quantity, category_id, attachment):
-    parts = session.get(f"{BASE_URL}/api/pc/{category_id}/parts").json()
+    parts_response = session.get(f"{BASE_URL}/api/pc/{category_id}/parts")
+    parts = safe_json_response(
+        parts_response, f"Fetch parts for category {category_id}"
+    )
+    if parts is None:
+        parts = []
     for part in parts:
         if part.get("ticket") == Ticket:
             return
@@ -106,17 +147,8 @@ def handlePostgresParts(Name, Epic, Ticket, Quantity, category_id, attachment):
             "file": (attachment.filename, attachment.get(), "application/octet-stream"),
         },
     )
-    if response.ok:
-        try:
-            print(response.json())
-        except requests.exceptions.JSONDecodeError:
-            print(
-                f"Part created successfully, but response was not JSON: {response.text}"
-            )
-    else:
-        print(
-            f"Failed to create part. Status: {response.status_code}, Response: {response.text}"
-        )
+    created = safe_json_response(response, f"Create part for ticket {Ticket}")
+    if created is None:
         print(
             "Data sent:",
             {
@@ -133,14 +165,30 @@ def cleanUpOldParts(issue_keys: set[str]):
         print("No JIRA issues returned; skipping cleanup to avoid deleting everything.")
         return
     deleted_parts = []
-    for pc in session.get(f"{BASE_URL}/api/pc").json():
-        parts = session.get(f"{BASE_URL}/api/pc/{pc['id']}/parts").json()
+    response = session.get(f"{BASE_URL}/api/pc")
+    categories = safe_json_response(response, "Fetch part categories for cleanup")
+    if categories is None:
+        return
+    if not isinstance(categories, list):
+        categories = []
+    for pc in categories:
+        category_id = pc.get("id") if isinstance(pc, dict) else None
+        if not category_id:
+            continue
+        parts_response = session.get(f"{BASE_URL}/api/pc/{category_id}/parts")
+        parts = safe_json_response(
+            parts_response, f"Fetch parts for category {category_id}"
+        )
+        if parts is None:
+            continue
+        if not isinstance(parts, list):
+            parts = []
         for part in parts:
             if part.get("ticket") not in issue_keys:
                 deleted_parts.append(part)
                 session.delete(f"{BASE_URL}/api/parts/{part['id']}")
         if len(parts) == 0:
-            session.delete(f"{BASE_URL}/api/pc/{pc['id']}")
+            session.delete(f"{BASE_URL}/api/pc/{category_id}")
 
 
 def cleanUpOldBoxTubes(issue_keys: set[str]):
@@ -149,11 +197,12 @@ def cleanUpOldBoxTubes(issue_keys: set[str]):
             "No JIRA issues returned; skipping box tube cleanup to avoid deleting everything."
         )
         return
-    try:
-        box_tubes = session.get(f"{BASE_URL}/api/boxTubes").json()
-    except Exception as exc:
-        print(f"Failed to fetch box tubes for cleanup: {exc}")
+    response = session.get(f"{BASE_URL}/api/boxTubes")
+    box_tubes = safe_json_response(response, "Fetch box tubes for cleanup")
+    if box_tubes is None:
         return
+    if not isinstance(box_tubes, list):
+        box_tubes = []
     for tube in box_tubes:
         if tube.get("ticket") not in issue_keys:
             tube_id = tube.get("id")
@@ -172,11 +221,16 @@ def deleteAllPartsAndCategories():
     )
     try:
         box_tube_response = session.get(f"{BASE_URL}/api/boxTubes")
-        box_tube_response.raise_for_status()
-        box_tubes = box_tube_response.json()
-    except Exception as exc:
+    except requests.exceptions.RequestException as exc:
         print(f"Failed to fetch box tubes for deletion: {exc}")
     else:
+        box_tubes = safe_json_response(
+            box_tube_response, "Fetch box tubes for deletion"
+        )
+        if box_tubes is None:
+            return
+        if not isinstance(box_tubes, list):
+            box_tubes = []
         for tube in box_tubes:
             tube_id = tube.get("id")
             if not tube_id:
@@ -188,22 +242,30 @@ def deleteAllPartsAndCategories():
                 )
     try:
         response = session.get(f"{BASE_URL}/api/pc")
-        response.raise_for_status()
-        categories = response.json()
-    except Exception as exc:
+    except requests.exceptions.RequestException as exc:
         print(f"Failed to fetch part categories for deletion: {exc}")
         return
+    categories = safe_json_response(response, "Fetch part categories for deletion")
+    if categories is None:
+        return
+    if not isinstance(categories, list):
+        categories = []
     for category in categories:
         category_id = category.get("id")
         if not category_id:
             continue
         try:
             parts_response = session.get(f"{BASE_URL}/api/pc/{category_id}/parts")
-            parts_response.raise_for_status()
-            parts = parts_response.json()
-        except Exception as exc:
+        except requests.exceptions.RequestException as exc:
             print(f"Failed to fetch parts for category {category_id}: {exc}")
             continue
+        parts = safe_json_response(
+            parts_response, f"Fetch parts for category {category_id} during deletion"
+        )
+        if parts is None:
+            continue
+        if not isinstance(parts, list):
+            parts = []
         for part in parts:
             part_id = part.get("id")
             if not part_id:
@@ -233,8 +295,12 @@ def cleanUpOldDrafts(issue_keys: set[str], drafts, issue_prefixes: set[str]):
 
 
 def handleBoxTubes(Name, Epic, Ticket, Quantity, teamid=teamid, attachment=None):
-    boxtubes = session.get(f"{BASE_URL}/api/boxTubes")
-    boxtubes = boxtubes.json()
+    boxtubes_response = session.get(f"{BASE_URL}/api/boxTubes")
+    boxtubes = safe_json_response(boxtubes_response, "Fetch box tubes")
+    if boxtubes is None:
+        boxtubes = []
+    if not isinstance(boxtubes, list):
+        boxtubes = []
     for boxtube in boxtubes:
         if boxtube.get("ticket") == Ticket:
             return
@@ -269,10 +335,14 @@ def fetchTeamDrafts(team_id):
         return [], {}, {}
     try:
         response = session.get(f"{BASE_URL}/api/drafts")
-        response.raise_for_status()
-        drafts = response.json()
-    except Exception as e:
-        print(f"Failed to fetch drafts: {e}")
+    except requests.exceptions.RequestException as exc:
+        print(f"Failed to fetch drafts: {exc}")
+        return [], {}, {}
+    drafts = safe_json_response(response, "Fetch drafts")
+    if drafts is None:
+        return [], {}, {}
+    if not isinstance(drafts, list):
+        print("Fetch drafts returned unexpected payload; ignoring.")
         return [], {}, {}
     drafts_by_ticket_type = {}
     drafts_by_ticket = {}
@@ -312,15 +382,12 @@ def createDraft(team_id, draft_type, data, attachment=None):
             "application/octet-stream",
         )
     response = session.post(f"{BASE_URL}/api/drafts", files=files)
-    if not response.ok:
-        print(
-            f"Failed to create draft for {data.get('ticket')}: {response.status_code}, {response.text}"
-        )
+    draft = safe_json_response(response, f"Create draft for {data.get('ticket')}")
+    if not draft or not isinstance(draft, dict):
         return None
-    try:
-        draft_id = response.json().get("id")
-    except requests.exceptions.JSONDecodeError:
-        print("Draft created but response was not JSON")
+    draft_id = draft.get("id")
+    if not draft_id:
+        print(f"Draft created for {data.get('ticket')} but ID missing in response.")
         return None
     return draft_id
 
