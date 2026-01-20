@@ -143,6 +143,29 @@ def cleanUpOldParts(issue_keys: set[str]):
             session.delete(f"{BASE_URL}/api/pc/{pc['id']}")
 
 
+def cleanUpOldBoxTubes(issue_keys: set[str]):
+    if not issue_keys:
+        print(
+            "No JIRA issues returned; skipping box tube cleanup to avoid deleting everything."
+        )
+        return
+    try:
+        box_tubes = session.get(f"{BASE_URL}/api/boxTubes").json()
+    except Exception as exc:
+        print(f"Failed to fetch box tubes for cleanup: {exc}")
+        return
+    for tube in box_tubes:
+        if tube.get("ticket") not in issue_keys:
+            tube_id = tube.get("id")
+            if not tube_id:
+                continue
+            delete_response = session.delete(f"{BASE_URL}/api/boxTubes/{tube_id}")
+            if not delete_response.ok:
+                print(
+                    f"Failed to delete box tube {tube_id}: {delete_response.status_code}, {delete_response.text}"
+                )
+
+
 def deleteAllPartsAndCategories():
     print(
         "No JIRA issues for two consecutive passes; deleting all AutoCAM parts, categories, and box tubes."
@@ -480,6 +503,7 @@ def processJiraIssues():
 
     print(f"Finished processing issues. {processed} processed.")
     cleanUpOldParts(issue_keys)
+    cleanUpOldBoxTubes(issue_keys)
     cleanUpOldDrafts(issue_keys, drafts, issue_prefixes)
     if issue_count == 0 and consecutive_empty_jira_passes >= EMPTY_JIRA_PASS_THRESHOLD:
         deleteAllPartsAndCategories()
